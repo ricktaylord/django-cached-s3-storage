@@ -1,2 +1,4 @@
 .hg*
 cachedS3/migrations/*
+*.pyc
+*workspace
