@@ -136,7 +136,7 @@ class CachedS3BotoStorage(S3BotoStorage):
     def _update_db_cache_entry(self, name, fle=None,
                                thumbnail=False, s3key=None,
                                update=True, original=False):
-        s3key = _ensure_s3key(self, name, fle, s3key)
+        s3key = self._ensure_s3key(self, name, fle, s3key)
         filemeta_defaults = {'size': s3key.size,
                              'last_modified': parse_ts_extended(
                                  s3key.last_modified),
