@@ -108,23 +108,40 @@ class CachedS3BotoStorage(S3BotoStorage):
             self._generate_folders()
         return self._folders
 
+    def set_original(self, name, original=True):
+        fm = S3FileMeta.objects.get(path=name)
+        fm.original = original
+        fm.save()
+        self._entries[fm.path] = fm
+
+    def batch_set_original(self, names, original=True):
+        qs = S3FileMeta.objects.filter(path__in=names)
+        return qs.update(original=original)
+
     def _get_file_ancestor_dirs(self, fle):
         parts = fle.split("/")
         ret = ["/".join(parts[:x]) for x in range(len(parts))]
         return ret
 
-    def _update_db_cache_entry(self, name, fle=None,
-                               thumbnail=False, s3key=None,
-                               update=True):
+    def _ensure_s3key(self, name, fle=None, s3key=None):
         if s3key is None:
             try:
                 s3key = fle.key
             except:
                 s3key = self.bucket.get_key(
                     self._normalize_name(self._clean_name(name)))
+        return s3key
+
+
+    def _update_db_cache_entry(self, name, fle=None,
+                               thumbnail=False, s3key=None,
+                               update=True, original=False):
+        s3key = _ensure_s3key(self, name, fle, s3key)
         filemeta_defaults = {'size': s3key.size,
                              'last_modified': parse_ts_extended(
-                                 s3key.last_modified)}
+                                 s3key.last_modified),
+                             'original':original}
+
         if name not in self.entries or self.entries[name].image_x is None:
             self._update_calls += 1
             if self._update_calls > 30:
@@ -145,6 +162,7 @@ class CachedS3BotoStorage(S3BotoStorage):
                 fle.close()
             except IOError:
                 filemeta_defaults.update({'image_x': 0, 'image_y': 0})
+
         if name not in self.entries or update or self.entries[name].image_x is None:
             filemeta, created = S3FileMeta.objects.get_or_create(
                 path=name, defaults=filemeta_defaults)
@@ -152,11 +170,17 @@ class CachedS3BotoStorage(S3BotoStorage):
                 filemeta.__dict__.update(filemeta_defaults)
                 filemeta.save()
             self._entries[filemeta.path] = filemeta
+
             self._update_folder_cache(filemeta)
 
-    def listmostrecent(self):
-        return ([], [el.path for el in S3FileMeta.objects.filter().order_by(
-            "-last_modified")[0:100]])
+    def listmostrecent(self, filter_original=True):
+        qs = S3FileMeta.objects
+        if filter_original:
+            qs = qs.filter(original=True)
+        else:
+            qs = qs.all()
+        return ([], [el.path for el in qs.order_by(
+            "-last_modified")[0:75]])
 
     @property
     def use_tag_directories(self):
@@ -189,6 +213,7 @@ class CachedS3BotoStorage(S3BotoStorage):
                  S3FileMeta.objects.filter(tags__name=last_seg)]
         if not paths:
             if last_seg == RECENT_UPLOAD_DIRECTORY:
+                logging.debug(self.listmostrecent())
                 return self.listmostrecent()
             return ([el.name for el in FileTag.objects.all()] +
                     [self.recent_upload_directory, ], [])
@@ -217,7 +242,7 @@ class CachedS3BotoStorage(S3BotoStorage):
         for key in blist:
             print key
             self._update_db_cache_entry(key.name[len(self.location):],
-                                        fle=None, s3key=key, update=False)
+                                        fle=None, s3key=key, update=True)
 
     def convert_all_images_to_RGB(self):
         for path, fl in self.entries.iteritems():
@@ -264,7 +289,11 @@ class CachedS3BotoStorage(S3BotoStorage):
         except KeyError:
             thumbnail = False
         logging.debug("Save args %s", str(kwargs))
-        self._update_db_cache_entry(saveret, fle=fle, thumbnail=thumbnail)
+        try:
+            original = kwargs['original']
+        except KeyError:
+            original = True
+        self._update_db_cache_entry(saveret, original=original, fle=fle, thumbnail=thumbnail)
         return saveret
 
     def modified_time(self, name):
