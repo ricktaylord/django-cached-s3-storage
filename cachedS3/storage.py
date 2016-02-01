@@ -279,8 +279,9 @@ class CachedS3BotoStorage(S3BotoStorage):
         path = self._clean_name(path)
         return path in self.entries.keys() and path not in self.folders.keys()
 
+      
+
     def _save(self, path, fle, *args, **kwargs):
-        logging.debug("Saving file %s", path)
         fle.seek(0)
         saveret = super(
             CachedS3BotoStorage, self)._save(path, fle, *args, **kwargs)
@@ -290,8 +291,8 @@ class CachedS3BotoStorage(S3BotoStorage):
             thumbnail = False
         logging.debug("Save args %s", str(kwargs))
         try:
-            original = kwargs['original']
-        except KeyError:
+            original = self.working_on_original
+        except AttributeError:
             original = True
         self._update_db_cache_entry(saveret, original=original, fle=fle, thumbnail=thumbnail)
         return saveret
